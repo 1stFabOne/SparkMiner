@@ -467,7 +467,7 @@
 // Pool Configuration
 // ============================================================
 #define DEFAULT_POOL_URL    "public-pool.io"
-#define DEFAULT_POOL_PORT   21496
+#define DEFAULT_POOL_PORT   3333
 #define DEFAULT_POOL_PASS   "x"
 
 #define BACKUP_POOL_URL     "pool.nerdminers.org"

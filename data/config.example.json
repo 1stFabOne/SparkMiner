@@ -3,7 +3,7 @@
   "wifi_password": "YourWiFiPassword",
 
   "pool_url": "public-pool.io",
-  "pool_port": 21496,
+  "pool_port": 3333,
   "wallet": "bc1qYourBitcoinAddressHere",
   "pool_password": "x",
   "worker_name": "SparkMiner",
