@@ -13,8 +13,10 @@ build_*.txt
 # Logs directory
 logs/
 
-# Development notes
-docs/
+# Development notes (superpowers-Doku wird versioniert)
+docs/*
+!docs/superpowers/
+!docs/superpowers/**
 .claude/
 
 # IDE
