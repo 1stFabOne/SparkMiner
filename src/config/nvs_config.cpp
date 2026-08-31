@@ -492,6 +492,117 @@ void nvs_config_init() {
     s_initialized = true;
 }
 
+// ============================================================
+// Legacy config migration (before wifiNetworks[] was added)
+// ============================================================
+
+// Old single-SSID struct layout, kept binary-identical so existing
+// NVS configs (ssid/wifiPassword + wallet/pools) survive a firmware
+// update instead of being wiped.
+typedef struct {
+    char ssid[MAX_SSID_LENGTH + 1];
+    char wifiPassword[MAX_PASSWORD_LEN + 1];
+    char poolUrl[MAX_POOL_URL_LEN + 1];
+    uint16_t poolPort;
+    char wallet[MAX_WALLET_LEN + 1];
+    char poolPassword[MAX_PASSWORD_LEN + 1];
+    char backupPoolUrl[MAX_POOL_URL_LEN + 1];
+    uint16_t backupPoolPort;
+    char backupWallet[MAX_WALLET_LEN + 1];
+    char backupPoolPassword[MAX_PASSWORD_LEN + 1];
+    uint8_t brightness;
+    uint16_t screenTimeout;
+    uint8_t rotation;
+    bool displayEnabled;
+    bool invertColors;
+    int8_t timezoneOffset;
+    char workerName[32];
+    double targetDifficulty;
+    bool statsEnabled;
+    char statsApiUrl[128];
+    char statsProxyUrl[128];
+    bool enableHttpsStats;
+    uint32_t checksum;
+} old_miner_config_t;
+
+static uint32_t calculateOldChecksum(const old_miner_config_t *config) {
+    const uint8_t *data = (const uint8_t *)config;
+    uint32_t sum = CONFIG_MAGIC;
+    size_t len = sizeof(old_miner_config_t) - sizeof(uint32_t);
+    for (size_t i = 0; i < len; i++) {
+        sum = sum * 31 + data[i];
+    }
+    return sum;
+}
+
+/**
+ * Attempt to migrate a legacy (pre-wifiNetworks) NVS config blob into the
+ * current miner_config_t. Returns true and fills `config` on success.
+ */
+static bool migrateLegacyConfig(miner_config_t *config, size_t storedLen) {
+    if (storedLen != sizeof(old_miner_config_t)) {
+        return false;
+    }
+
+    old_miner_config_t old;
+    size_t read = s_prefs.getBytes(NVS_KEY_CONFIG, &old, sizeof(old_miner_config_t));
+    if (read != sizeof(old_miner_config_t)) {
+        return false;
+    }
+
+    // Validate the old checksum before trusting any field.
+    if (old.checksum != calculateOldChecksum(&old)) {
+        Serial.println("[NVS] Legacy config checksum mismatch - not migrating");
+        return false;
+    }
+
+    // Start from defaults, then overwrite with migrated values.
+    nvs_config_reset(config);
+
+    // Migrate the single WiFi network into wifiNetworks[0].
+    if (old.ssid[0] != '\0') {
+        wifi_network_t *wn = &config->wifiNetworks[0];
+        safeStrCpy(wn->ssid, old.ssid, sizeof(wn->ssid));
+        safeStrCpy(wn->password, old.wifiPassword, sizeof(wn->password));
+        config->wifiNetworkCount = 1;
+    }
+
+    // Pool settings
+    safeStrCpy(config->poolUrl, old.poolUrl, sizeof(config->poolUrl));
+    config->poolPort = old.poolPort;
+    safeStrCpy(config->wallet, old.wallet, sizeof(config->wallet));
+    safeStrCpy(config->poolPassword, old.poolPassword, sizeof(config->poolPassword));
+
+    // Backup pool
+    safeStrCpy(config->backupPoolUrl, old.backupPoolUrl, sizeof(config->backupPoolUrl));
+    config->backupPoolPort = old.backupPoolPort;
+    safeStrCpy(config->backupWallet, old.backupWallet, sizeof(config->backupWallet));
+    safeStrCpy(config->backupPoolPassword, old.backupPoolPassword, sizeof(config->backupPoolPassword));
+
+    // Display
+    config->brightness = old.brightness;
+    config->screenTimeout = old.screenTimeout;
+    config->rotation = old.rotation;
+    config->displayEnabled = old.displayEnabled;
+    config->invertColors = old.invertColors;
+    config->timezoneOffset = old.timezoneOffset;
+
+    // Miner
+    safeStrCpy(config->workerName, old.workerName, sizeof(config->workerName));
+    config->targetDifficulty = old.targetDifficulty;
+
+    // Stats
+    config->statsEnabled = old.statsEnabled;
+    safeStrCpy(config->statsApiUrl, old.statsApiUrl, sizeof(config->statsApiUrl));
+    safeStrCpy(config->statsProxyUrl, old.statsProxyUrl, sizeof(config->statsProxyUrl));
+    config->enableHttpsStats = old.enableHttpsStats;
+
+    Serial.printf("[NVS] Migrated legacy config: wallet=%s, wifi=%s\n",
+                  config->wallet[0] ? config->wallet : "(empty)",
+                  config->wifiNetworkCount ? config->wifiNetworks[0].ssid : "(empty)");
+    return true;
+}
+
 bool nvs_config_load(miner_config_t *config) {
     Serial.printf("[NVS] Loading config (struct size: %d bytes)\n", sizeof(miner_config_t));
 
@@ -509,7 +620,18 @@ bool nvs_config_load(miner_config_t *config) {
 
     if (len != sizeof(miner_config_t)) {
         Serial.printf("[NVS] Config size mismatch: stored=%d, expected=%d\n", len, sizeof(miner_config_t));
-        Serial.println("[NVS] Struct size changed - clearing old config");
+
+        // Try to migrate the legacy (pre-wifiNetworks) config instead of wiping it.
+        if (migrateLegacyConfig(config, len)) {
+            s_prefs.end();
+            // Persist the migrated config with the new struct layout so the
+            // next boot loads it directly without re-migrating.
+            Serial.println("[NVS] Persisting migrated config...");
+            nvs_config_save(config);
+            return true;
+        }
+
+        Serial.println("[NVS] No matching legacy layout - clearing old config");
         // Clear the old incompatible config
         s_prefs.end();
         if (s_prefs.begin(NVS_NAMESPACE, false)) {

@@ -165,7 +165,7 @@ static void handleWifiList() {
 }
 
 static void handleWifiAdd() {
-    StaticJsonDocument<256> body;
+    StaticJsonDocument<512> body;
     deserializeJson(body, s_server.arg("plain"));
     const char* ssid = body["ssid"] | "";
     const char* pw = body["password"] | "";
@@ -176,11 +176,13 @@ static void handleWifiAdd() {
     }
 
     miner_config_t *cfg = nvs_config_get();
+    wifimulti_lock();
 
     // Dedup
     for (uint8_t i = 0; i < cfg->wifiNetworkCount; i++) {
         if (strcmp(cfg->wifiNetworks[i].ssid, ssid) == 0) {
             nvs_config_save(cfg);
+            wifimulti_unlock();
             wifimulti_rescan();
             s_server.send(200, "text/plain", "exists");
             return;
@@ -188,6 +190,7 @@ static void handleWifiAdd() {
     }
 
     if (cfg->wifiNetworkCount >= MAX_WIFI_NETWORKS) {
+        wifimulti_unlock();
         s_server.send(400, "text/plain", "max 5 networks reached");
         return;
     }
@@ -199,6 +202,7 @@ static void handleWifiAdd() {
     wn->password[MAX_PASSWORD_LEN] = '\0';
 
     nvs_config_save(cfg);
+    wifimulti_unlock();
     wifimulti_rescan();
     Serial.printf("[DASHBOARD] WiFi network added: %s\n", wn->ssid);
     s_server.send(200, "text/plain", "ok");
@@ -212,17 +216,20 @@ static void handleWifiDelete() {
     }
 
     miner_config_t *cfg = nvs_config_get();
+    wifimulti_lock();
     for (uint8_t i = 0; i < cfg->wifiNetworkCount; i++) {
         if (strcmp(cfg->wifiNetworks[i].ssid, ssid.c_str()) == 0) {
             cfg->wifiNetworks[i] = cfg->wifiNetworks[cfg->wifiNetworkCount - 1];
             cfg->wifiNetworkCount--;
             nvs_config_save(cfg);
+            wifimulti_unlock();
             wifimulti_rescan();
             Serial.printf("[DASHBOARD] WiFi network removed: %s\n", ssid.c_str());
             s_server.send(200, "text/plain", "ok");
             return;
         }
     }
+    wifimulti_unlock();
     s_server.send(404, "text/plain", "not found");
 }
 

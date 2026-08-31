@@ -42,13 +42,51 @@ static void updateSsid() {
     }
 }
 
+// Guard for the shared global config, which the dashboard task (Core 0) may
+// write while this loop (Core 1) reads it. We snapshot under the lock and
+// never hold it across WiFi.begin()/delay().
+static SemaphoreHandle_t s_cfgMutex = NULL;
+
+/**
+ * Snapshot the saved networks into caller-provided buffers under the config
+ * lock. Returns number of valid networks (clamped to MAX_WIFI_NETWORKS).
+ */
+static uint8_t snapshotNetworks(char outSsid[][MAX_SSID_LENGTH + 1],
+                                char outPwd[][MAX_PASSWORD_LEN + 1],
+                                uint8_t outMax) {
+    if (s_cfgMutex == NULL) s_cfgMutex = xSemaphoreCreateMutex();
+
+    uint8_t count = 0;
+    if (xSemaphoreTake(s_cfgMutex, pdMS_TO_TICKS(200)) != pdTRUE) {
+        return 0;
+    }
+
+    miner_config_t *c = nvs_config_get();
+    uint8_t n = c->wifiNetworkCount;
+    if (n > MAX_WIFI_NETWORKS) n = MAX_WIFI_NETWORKS;
+    if (n > outMax) n = outMax;
+
+    for (uint8_t i = 0; i < n; i++) {
+        strncpy(outSsid[i], c->wifiNetworks[i].ssid, MAX_SSID_LENGTH);
+        outSsid[i][MAX_SSID_LENGTH] = '\0';
+        strncpy(outPwd[i], c->wifiNetworks[i].password, MAX_PASSWORD_LEN);
+        outPwd[i][MAX_PASSWORD_LEN] = '\0';
+    }
+    count = n;
+
+    xSemaphoreGive(s_cfgMutex);
+    return count;
+}
+
 /**
  * Try to connect to the first saved network that is in range.
  * Returns true if connected.
  */
 static bool tryConnectNext() {
-    miner_config_t *c = nvs_config_get();
-    if (c->wifiNetworkCount == 0) return false;
+    char ssids[MAX_WIFI_NETWORKS][MAX_SSID_LENGTH + 1];
+    char pwds[MAX_WIFI_NETWORKS][MAX_PASSWORD_LEN + 1];
+    uint8_t count = snapshotNetworks(ssids, pwds, MAX_WIFI_NETWORKS);
+    if (count == 0) return false;
 
     WiFi.mode(WIFI_STA);
     int n = WiFi.scanNetworks();
@@ -57,13 +95,12 @@ static bool tryConnectNext() {
         return false;
     }
 
-    for (uint8_t i = 0; i < c->wifiNetworkCount; i++) {
-        const char* wanted = c->wifiNetworks[i].ssid;
-        if (wanted[0] == '\0') continue;
+    for (uint8_t i = 0; i < count; i++) {
+        const char* wanted = ssids[i];
         for (int j = 0; j < n; j++) {
             if (strcmp(wanted, WiFi.SSID(j).c_str()) == 0) {
                 Serial.printf("[WIFI-MULTI] Found '%s', connecting...\n", wanted);
-                WiFi.begin(c->wifiNetworks[i].ssid, c->wifiNetworks[i].password);
+                WiFi.begin(ssids[i], pwds[i]);
                 unsigned long t0 = millis();
                 while (WiFi.status() != WL_CONNECTED && (millis() - t0) < CONNECT_TIMEOUT_MS) {
                     delay(100);
@@ -180,4 +217,13 @@ const char* wifimulti_get_ssid() {
 
 void wifimulti_rescan() {
     s_lastAttempt = 0;
+}
+
+void wifimulti_lock() {
+    if (s_cfgMutex == NULL) s_cfgMutex = xSemaphoreCreateMutex();
+    xSemaphoreTake(s_cfgMutex, pdMS_TO_TICKS(500));
+}
+
+void wifimulti_unlock() {
+    if (s_cfgMutex != NULL) xSemaphoreGive(s_cfgMutex);
 }

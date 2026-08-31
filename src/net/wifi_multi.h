@@ -49,4 +49,12 @@ void wifimulti_rescan();
  */
 const char* wifimulti_get_ssid();
 
+/**
+ * Briefly lock the config used for network switching. Call around any
+ * modification of the saved network list (e.g. from the web dashboard)
+ * to avoid a race with the reconnect loop on the other core.
+ */
+void wifimulti_lock();
+void wifimulti_unlock();
+
 #endif // WIFI_MULTI_H
