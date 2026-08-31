@@ -12,13 +12,27 @@
 #include <board_config.h>
 
 /**
+ * Number of WiFi networks that can be stored in the config.
+ * The miner tries each stored network in order until one connects.
+ */
+#define MAX_WIFI_NETWORKS 5
+
+/**
+ * A single WiFi network credential (SSID + password).
+ */
+typedef struct {
+    char ssid[MAX_SSID_LENGTH + 1];
+    char password[MAX_PASSWORD_LEN + 1];
+} wifi_network_t;
+
+/**
  * Miner configuration structure
  * Stored in NVS for persistence across reboots
  */
 typedef struct {
-    // WiFi settings
-    char ssid[MAX_SSID_LENGTH + 1];
-    char wifiPassword[MAX_PASSWORD_LEN + 1];
+    // WiFi settings (multi-network list, up to MAX_WIFI_NETWORKS)
+    uint8_t wifiNetworkCount;
+    wifi_network_t wifiNetworks[MAX_WIFI_NETWORKS];
 
     // Primary pool
     char poolUrl[MAX_POOL_URL_LEN + 1];

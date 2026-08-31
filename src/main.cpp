@@ -31,9 +31,13 @@ extern "C" {
 #include "stratum/stratum_types.h"
 #include "stratum/stratum.h"
 #include "config/nvs_config.h"
-#include "config/wifi_manager.h"
+#include "net/wifi_multi.h"
 #include "stats/monitor.h"
 #include "display/display.h"
+
+#ifdef USE_WEB_DASHBOARD
+#include "web/dashboard.h"
+#endif
 
 // Task handles
 TaskHandle_t miner0Task = NULL;
@@ -399,10 +403,9 @@ void setup() {
         Serial.println("[INIT] Button handlers registered (click/double/triple/long-press)");
     #endif
 
-    // Initialize WiFiManager and connect
-    wifi_manager_init();
+    // Initialize multi-network WiFi (mDNS, auto-reconnect, fallback AP)
     Serial.println("[INIT] Starting WiFi...");
-    wifi_manager_start();
+    wifimulti_init();
 
     // Register WiFi event handlers for diagnostics
     WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -452,6 +455,8 @@ void setup() {
  * Minimal work here - most work done in FreeRTOS tasks
  */
 void loop() {
+    // WiFi wants state checks while in AP mode (they run on the main/other cores)
+    wifimulti_loop();
     // Button handling moved to dedicated FreeRTOS task for responsiveness during mining
     // Yield to FreeRTOS tasks
     vTaskDelay(pdMS_TO_TICKS(100));  // Main loop can sleep longer now
@@ -532,6 +537,20 @@ void setupTasks() {
             &buttonTask,
             0
         );
+    #endif
+
+    // Web dashboard (headless view) - always runs so status is visible
+    #if defined(USE_WEB_DASHBOARD)
+        xTaskCreatePinnedToCore(
+            dashboard_task,
+            "Dashboard",
+            DASHBOARD_STACK,
+            NULL,
+            DASHBOARD_PRIORITY,
+            NULL,
+            DASHBOARD_CORE
+        );
+        Serial.println("[INIT] Web dashboard task created");
     #endif
 
     // Only create miner tasks if wallet is configured

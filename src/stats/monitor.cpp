@@ -13,7 +13,7 @@
 #include "../mining/miner.h"
 #include "../stratum/stratum.h"
 #include "../config/nvs_config.h"
-#include "../config/wifi_manager.h"
+#include "../net/wifi_multi.h"
 
 // Update intervals
 #define DISPLAY_UPDATE_MS   1000    // 1 second
@@ -107,7 +107,7 @@ static void updateDisplayData(display_data_t *data) {
     // Network info
     data->wifiConnected = (WiFi.status() == WL_CONNECTED);
     data->wifiRssi = data->wifiConnected ? WiFi.RSSI() : 0;
-    data->ipAddress = wifi_manager_get_ip();
+    data->ipAddress = wifimulti_get_ip();
 
     // Live stats (thread-safe copy)
     live_stats_t lstats;

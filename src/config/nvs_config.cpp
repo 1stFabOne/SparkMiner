@@ -200,12 +200,37 @@ static bool loadConfigFromFile(miner_config_t *config) {
         return false;
     }
 
-    // WiFi settings
+    // WiFi settings (multi-network list)
+    config->wifiNetworkCount = 0;
+
+    // Legacy single-SSID config.json (first boot with old firmware from SD)
+    // Migrate it into the first network entry so users don't lose their network.
     if (doc.containsKey("ssid")) {
-        safeStrCpy(config->ssid, doc["ssid"], sizeof(config->ssid));
+        const char* legacySsid = doc["ssid"] | "";
+        if (legacySsid[0] != '\0' && config->wifiNetworkCount < MAX_WIFI_NETWORKS) {
+            wifi_network_t *wn = &config->wifiNetworks[config->wifiNetworkCount++];
+            safeStrCpy(wn->ssid, legacySsid, sizeof(wn->ssid));
+            if (doc.containsKey("wifi_password")) {
+                safeStrCpy(wn->password, doc["wifi_password"] | "", sizeof(wn->password));
+            } else {
+                wn->password[0] = '\0';
+            }
+            Serial.printf("[CONFIG] Migrated legacy ssid '%s' to wifi_networks[0]\n", wn->ssid);
+        }
     }
-    if (doc.containsKey("wifi_password")) {
-        safeStrCpy(config->wifiPassword, doc["wifi_password"], sizeof(config->wifiPassword));
+
+    // New multi-network array
+    if (doc.containsKey("wifi_networks")) {
+        JsonArray nets = doc["wifi_networks"].as<JsonArray>();
+        for (JsonObject n : nets) {
+            if (config->wifiNetworkCount >= MAX_WIFI_NETWORKS) break;
+            wifi_network_t *wn = &config->wifiNetworks[config->wifiNetworkCount];
+            safeStrCpy(wn->ssid, n["ssid"] | "", sizeof(wn->ssid));
+            safeStrCpy(wn->password, n["password"] | "", sizeof(wn->password));
+            if (wn->ssid[0] != '\0') {
+                config->wifiNetworkCount++;
+            }
+        }
     }
 
     // Pool settings
@@ -553,8 +578,7 @@ void nvs_config_reset(miner_config_t *config) {
     memset(config, 0, sizeof(miner_config_t));
 
     // WiFi defaults (empty - will use captive portal)
-    config->ssid[0] = '\0';
-    config->wifiPassword[0] = '\0';
+    config->wifiNetworkCount = 0;
 
     // Primary pool defaults
     safeStrCpy(config->poolUrl, DEFAULT_POOL_URL, sizeof(config->poolUrl));
