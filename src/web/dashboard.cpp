@@ -35,10 +35,10 @@ static double computeHashRate() {
     uint32_t now = millis();
     uint32_t elapsed = now - s_lastHashTime;
 
-    if (elapsed >= 1000) {
+    if (elapsed >= 250) {
         uint64_t delta = mstats->hashes - s_lastHashes;
         double instant = (double)delta * 1000.0 / elapsed;
-        const double alpha = 0.15;
+        const double alpha = 0.4;
         if (s_firstSample) {
             s_smoothedHashRate = instant;
             s_firstSample = false;
